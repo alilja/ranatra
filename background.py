@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import math
 
 cam = cv2.VideoCapture(0)
 
@@ -161,16 +162,22 @@ while(1):
                 hand_detection.train_hand(frame)
     else:
         tracking_frame = apply_hist_mask(frame, hand_detection.hand_hist)
-        cv2.GaussianBlur(tracking_frame, (13, 13), 0, tracking_frame)
+        tracking_frame = cv2.morphologyEx(tracking_frame, cv2.MORPH_OPEN, np.ones((25, 25), np.uint8))
+        tracking_frame = cv2.morphologyEx(tracking_frame, cv2.MORPH_CLOSE, np.ones((31, 31), np.uint8))
+        cv2.GaussianBlur(tracking_frame, (11, 11), 0, tracking_frame)
+
         gray = cv2.cvtColor(tracking_frame, cv2.COLOR_BGR2GRAY)
         ret, thresh = cv2.threshold(gray, 0, 255, 0)
         _, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         if contours is not None and len(contours) > 0:
-            cv2.drawContours(frame, contours, -1, (0,255,0), 3)
-
             max_contour = calc_max_contour(contours)
-            hull = calc_hull(max_contour)
+
+            hull = cv2.convexHull(max_contour)
+            cv2.drawContours(tracking_frame, [hull], 0, (0, 0, 255), 0)
+
+            cv2.drawContours(tracking_frame, max_contour, -1, (0, 255, 0), 3)
+
             centroid = calc_centroid(max_contour)
             defects = calc_defects(max_contour)
 
@@ -178,7 +185,30 @@ while(1):
                 farthest_point = calc_farthest_point(defects, max_contour, centroid)
 
                 if farthest_point is not None:
-                    cv2.circle(frame, farthest_point, 5, [0, 0, 255], -1)
+                    cv2.circle(tracking_frame, farthest_point, 5, [0, 0, 255], -1)
+
+            defects = cv2.convexityDefects(max_contour, cv2.convexHull(max_contour, returnPoints=False))
+
+            count_defects = 0
+
+            for i in range(defects.shape[0]):
+                s,e,f,d = defects[i,0]
+                start = tuple(max_contour[s][0])
+                end = tuple(max_contour[e][0])
+                far = tuple(max_contour[f][0])
+                a = math.sqrt((end[0] - start[0])**2 + (end[1] - start[1])**2)
+                b = math.sqrt((far[0] - start[0])**2 + (far[1] - start[1])**2)
+                c = math.sqrt((end[0] - far[0])**2 + (end[1] - far[1])**2)
+                angle = math.acos((b**2 + c**2 - a**2)/(2*b*c)) * 57
+                if angle <= 90:
+                    count_defects += 1
+                    cv2.circle(tracking_frame,far,1,[0,0,255],-1)
+                #dist = cv2.pointPolygonTest(max_contour,far,True)
+                cv2.line(tracking_frame,start,end,[0,255,0],2)
+
+            print(count_defects)
+
+        frame = tracking_frame
 
     cv2.imshow('image', frame)
 
